@@ -1,0 +1,372 @@
+﻿///$tab Main
+SET ThousandSep='.';
+SET DecimalSep=',';
+SET MoneyThousandSep='.';
+SET MoneyDecimalSep=',';
+SET MoneyFormat='R$ #.##0,00;-R$ #.##0,00';
+SET TimeFormat='hh:mm:ss';
+SET DateFormat='DD/MM/YYYY';
+SET TimestampFormat='DD/MM/YYYY hh:mm:ss[.fff]';
+SET FirstWeekDay=6;
+SET BrokenWeeks=1;
+SET ReferenceDay=0;
+SET FirstMonthOfYear=1;
+SET CollationLocale='pt-BR';
+SET MonthNames='jan;fev;mar;abr;mai;jun;jul;ago;set;out;nov;dez';
+SET LongMonthNames='janeiro;fevereiro;março;abril;maio;junho;julho;agosto;setembro;outubro;novembro;dezembro';
+SET DayNames='seg;ter;qua;qui;sex;sáb;dom';
+SET LongDayNames='segunda-feira;terça-feira;quarta-feira;quinta-feira;sexta-feira;sábado;domingo';
+
+
+		SET vQVDsOutputPath = 'D:\Processos\Forecast Accuracy\v2';
+
+
+		SET vDashboardPath = '\\sjkfs05.sjk.emb\vss\GMT\71. Forecast Accuracy\v2';
+		
+		LET vCurrentDate = Date ( MonthStart ( Today ( 1 ) ), 'MM/YYYY' ) ;
+
+
+
+		// Mapa de renomeação das Locations pós modificação 
+		
+		LocationMatrix:
+		
+		Mapping LOAD * Inline [
+		
+		Location, NewLocation
+		HUB EXE MEM, DC USA
+		DC COM FLL, DC USA
+		DC EUG, DC BRA
+		DC TTE, DC BRA
+		DC COM EUR, DC EUR
+		DC EXE BRU, DC EUR
+		DC EXE LBG, DC EUR
+		DC COM BJG, DC BJG
+		DC EXE BJG, DC BJG
+		DC COM SIN, DC SIN
+		DC EXE SIN, DC SIN		
+		];
+///$tab Forecast EXE
+
+
+
+IF vForecastEXE = 'Yes' THEN
+
+
+		//PR59 - SPM Civil
+		OLEDB CONNECT TO [] ();	
+
+
+		/* Carga das Streams que devem ser consideradas para leitura de Forecast */
+
+
+		//EXE
+		ForecastStreamsTempEXE:
+		
+		LOAD 
+			Concat ( [Forecast Streams], ',' )			as [Forecast Streams Concat]
+		FROM
+		[$(vDashboardPath)\Forecast Accuracy Parameters.xlsx]
+		(ooxml, embedded labels, table is [Forecast Streams EXE]);
+
+
+		LET vStreamsEXE = Peek ( 'Forecast Streams Concat' )   ;
+		DROP Table ForecastStreamsTempEXE;
+		
+		
+		
+		/* Carga do Forecast */
+		
+		ForecastEXE:
+		
+		LOAD 
+		
+			[PartID],
+			Ecode,
+			[LocID],
+			Location,
+			Date ( [Forecast Slice Date], 'MM/YYYY' )													as [Forecast Slice Date],
+			[Forecast Qty],
+			PartID & '-' & LocID																		as [%PairKeyID],
+			Ecode & '-' & Location																		as [%PairKey],
+			Ecode & '-' & Location & '-' & Date ( [Forecast Slice Date], 'MM/YYYY' )					as [%CompoundForecastKey],
+			'EXE'																						as [Business Unit]
+		
+		Where Match ( FORECASTSTREAMID, SubField ('$(vStreamsEXE)', ',' ) ) ;
+		
+		
+		SQL
+		
+		SELECT 
+		
+			PM.PARTID														as "PartID",
+			PM.PARTNUMBER												as "Ecode",
+			LM.LOCID															as "LocID",
+			LM.LOCNAME														as "Location",					
+			FD.FORECASTSTREAMID,
+			FD.FORECASTSLICEDATE										as "Forecast Slice Date",
+			FD.NETFORECAST												as "Forecast Qty"
+		
+		FROM IPCS_FORECAST_DETAIL FD
+		
+		LEFT JOIN		IPCS_LOC_MASTER LM 			ON LM.LOCID = FD.LOCID
+		LEFT JOIN		IPCS_PART_MASTER PM 		ON PM.PARTID = FD.PARTID
+		
+		WHERE FD.FORECASTSLICEDATE < SYSDATE
+		
+		;
+		
+		
+		
+		/* 31/03/22 - Adicionando regra de renomeação das locations antigas para os casos que os nomes de Location mudaram mas o Forecast não migrou.
+		Ex: pós OneEmbraer HUB EXE MEM se tornou DC USA, portanto é necessário pegar o histórico e unificar o nome de locations */
+		
+		NoConcatenate
+		
+		ForecastEXETemp:
+		
+		LOAD *,
+			
+			ApplyMap ( 'LocationMatrix', Location )		as NewLocation
+			
+		 Resident ForecastEXE;
+		
+		DROP Table ForecastEXE;		
+		Rename Table ForecastEXETemp to ForecastEXE;
+		
+		// Renomeando o campo
+		
+		DROP Field Location;
+		Rename Field NewLocation to Location;		
+		
+		
+		STORE ForecastEXE into '$(vQVDsOutputPath)\ForecastEXE.qvd' (qvd) ;
+		DROP Table ForecastEXE ;
+		
+END IF;
+///$tab Forecast DEF
+
+
+
+IF vForecastDEF = 'Yes' THEN
+
+
+		//PR01 - SPM Defesa	
+		CUSTOM CONNECT TO "";
+
+
+		/* Carga das Streams que devem ser consideradas para leitura de Forecast */
+		
+		
+		//DEF
+		ForecastStreamsTempDEF:
+		
+		LOAD 
+			Concat ( [Forecast Streams], ',' )			as [Forecast Streams Concat]
+		FROM
+		[$(vDashboardPath)\Forecast Accuracy Parameters.xlsx]
+		(ooxml, embedded labels, table is [Forecast Streams DEF]);
+
+
+		LET vStreamsDEF = Peek ( 'Forecast Streams Concat' )   ;
+		DROP Table ForecastStreamsTempDEF;
+		
+		
+		
+		/* Carga do Forecast */
+		
+		ForecastDEF:
+		
+		LOAD 
+		
+			[PartID],
+			Ecode,
+			[LocID],
+			Location,
+			Date ( [Forecast Slice Date], 'MM/YYYY' )													as [Forecast Slice Date],
+			[Forecast Qty],
+			PartID & '-' & LocID																		as [%PairKeyID],
+			Ecode & '-' & Location																		as [%PairKey],
+			Ecode & '-' & Location & '-' & Date ( [Forecast Slice Date], 'MM/YYYY' )					as [%CompoundForecastKey],
+			'DEF'																						as [Business Unit]
+		
+		Where Match ( FORECASTSTREAMID, SubField ('$(vStreamsDEF)', ',' ) ) ;
+		
+		
+		SQL
+		
+		SELECT 
+		
+			PM.PARTID														as "PartID",
+			PM.PARTNUMBER												as "Ecode",
+			LM.LOCID															as "LocID",
+			LM.LOCNAME														as "Location",					
+			FD.FORECASTSTREAMID,
+			FD.FORECASTSLICEDATE										as "Forecast Slice Date",
+			FD.NETFORECAST												as "Forecast Qty"
+		
+		FROM IPCS_FORECAST_DETAIL FD
+		
+		LEFT JOIN		IPCS_LOC_MASTER LM 			ON LM.LOCID = FD.LOCID
+		LEFT JOIN		IPCS_PART_MASTER PM 		ON PM.PARTID = FD.PARTID
+		
+		WHERE FD.FORECASTSLICEDATE < SYSDATE
+		
+		;
+		
+	
+				
+		STORE ForecastDEF into '$(vQVDsOutputPath)\ForecastDEF.qvd' (qvd) ;
+		DROP Table ForecastDEF ;
+		
+END IF;
+///$tab Demand DEF
+
+
+
+IF vDemandDEF = 'Yes' THEN
+
+
+		//PR01 - SPM Defesa	
+		CUSTOM CONNECT TO "";
+
+
+		/* Carga das Streams que devem ser consideradas para leitura de Forecast */
+
+
+		//DEF
+		DemandStreamsTempDEF:
+		
+		LOAD 
+			Concat ( [Demand Streams], ',' )			as [Demand Streams Concat]
+		FROM
+		[$(vDashboardPath)\Forecast Accuracy Parameters.xlsx]
+		(ooxml, embedded labels, table is [Demand Streams DEF]);
+
+
+		LET vStreamsDEF = Peek ( 'Demand Streams Concat' )   ;
+		DROP Table DemandStreamsTempDEF;
+
+		DemandDEF:
+		
+		LOAD
+		
+			Ecode & '-' & Location & '-' & Date ( [Demand History Date], 'MM/YYYY' )							as [%CompoundForecastKey],
+			[Demanded Qty]
+			
+		Where Match ( DEMANDSTREAMID, SubField ('$(vStreamsDEF)', ',' ) ) ;
+		
+		SQL
+		
+			SELECT
+
+				PM.PARTID 								as "PartID",
+				PM.PARTNUMBER 						as "Ecode",
+				LM.LOCID 									as "LocID",
+				LM.LOCNAME 							as "Location",
+				DH.DEMANDSTREAMID,
+				DH.HISTORYBEGDATE 					as "Demand History Date",
+				DH.HISTORYAMOUNT 					as "Demanded Qty"
+									
+			FROM IPCS_DEMAND_HISTORY DH
+				
+			LEFT JOIN IPCS_PART_MASTER PM ON PM.PARTID = DH.PARTID
+				
+			LEFT JOIN IPCS_LOC_MASTER LM ON LM.LOCID = DH.LOCID
+				
+				
+			WHERE DH.HISTORYBEGDATE < SYSDATE
+				
+		;
+		
+		
+		
+		STORE DemandDEF into '$(vQVDsOutputPath)\DemandDEF.qvd' (qvd) ;
+		DROP Table DemandDEF ;
+		
+END IF;
+///$tab Forecast Method
+
+
+
+IF vForecastMethod = 'Yes' THEN
+
+
+		// Executiva
+		
+		//PR59 - SPM Civil
+		OLEDB CONNECT TO [] ();	
+		
+		ForecastMethod:
+		
+		SQL 
+			SELECT 
+				PM.PARTNUMBER				as "Ecode",
+				LM.LOCNAME						as "Location",
+				FD.FORECASTMETHOD			as "ForecastMethodID"
+				
+			FROM
+				
+				IPCS_FORECAST_DETAIL FD
+				
+				LEFT JOIN IPCS_PART_MASTER PM ON PM.PARTID = FD.PARTID
+				
+				LEFT JOIN IPCS_LOC_MASTER LM ON LM.LOCID = FD.LOCID
+								
+			WHERE
+				FD.FORECASTSTREAMID = 3
+					AND
+				TO_CHAR(fd.FORECASTSLICEDATE, 'MM/YYYY') = '$(vCurrentDate)'
+		;
+		
+		
+		
+		// Defesa
+		
+		//PR01 - SPM Defesa	
+		CUSTOM CONNECT TO "";
+		
+		Concatenate ( ForecastMethod )
+		
+		SQL 
+			SELECT 
+				PM.PARTNUMBER				as "Ecode",
+				LM.LOCNAME						as "Location",
+				FD.FORECASTMETHOD			as "ForecastMethodID"
+				
+			FROM
+				
+				IPCS_FORECAST_DETAIL FD
+				
+				LEFT JOIN IPCS_PART_MASTER PM ON PM.PARTID = FD.PARTID
+				
+				LEFT JOIN IPCS_LOC_MASTER LM ON LM.LOCID = FD.LOCID
+								
+			WHERE
+				FD.FORECASTSTREAMID = 3
+					AND
+				TO_CHAR(fd.FORECASTSLICEDATE, 'MM/YYYY') = '$(vCurrentDate)'
+		;
+		
+		
+		
+		// Carregando matriz de atribuição de nome às IDs de Forecast Methods
+		
+		Left Join ( ForecastMethod )
+		
+		LOAD 
+		
+			ForecastMethodID, 
+			ForecastMethodName				as [Forecast Method]				
+			
+		FROM
+		[$(vDashboardPath)\Forecast Accuracy Parameters.xlsx]
+		(ooxml, embedded labels, table is [Forecast Methods Matrix]);
+		
+		
+		
+		STORE ForecastMethod into '$(vQVDsOutputPath)\ForecastMethod.qvd' (qvd) ;
+		DROP Table ForecastMethod ;
+
+		
+END IF;
