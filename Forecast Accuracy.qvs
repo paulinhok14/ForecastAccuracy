@@ -362,7 +362,7 @@ SET LongDayNames='segunda-feira;terça-feira;quarta-feira;quinta-feira;sexta-fei
 		
 		
 			//PR59 - SPM Civil
-			OLEDB CONNECT TO [Provider=OraOLEDB.Oracle.1;Persist Security Info=True;User ID=spm_stg;Data Source=pr59;Extended Properties=""] (XPassword is DSPKGZJGETMGWZAOPLFB);	
+			OLEDB CONNECT TO [];	
 			
 			ForecastStreamsEXE:
 			
