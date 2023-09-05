@@ -1,0 +1,487 @@
+﻿///$tab Main
+SET ThousandSep='.';
+SET DecimalSep=',';
+SET MoneyThousandSep='.';
+SET MoneyDecimalSep=',';
+SET MoneyFormat='R$ #.##0,00;-R$ #.##0,00';
+SET TimeFormat='hh:mm:ss';
+SET DateFormat='DD/MM/YYYY';
+SET TimestampFormat='DD/MM/YYYY hh:mm:ss[.fff]';
+SET FirstWeekDay=6;
+SET BrokenWeeks=1;
+SET ReferenceDay=0;
+SET FirstMonthOfYear=1;
+SET CollationLocale='pt-BR';
+SET MonthNames='jan;fev;mar;abr;mai;jun;jul;ago;set;out;nov;dez';
+SET LongMonthNames='janeiro;fevereiro;março;abril;maio;junho;julho;agosto;setembro;outubro;novembro;dezembro';
+SET DayNames='seg;ter;qua;qui;sex;sáb;dom';
+SET LongDayNames='segunda-feira;terça-feira;quarta-feira;quinta-feira;sexta-feira;sábado;domingo';
+
+	SET vMostraMenu = 0;
+	SET vDeviation = 'Acquisition Cost';
+	SET vMostraLineItems = 0;
+	SET vMostraFiltro = 0;
+	SET vLista = 1;
+	SET vMostraMenuNew = 0;
+	SET vMostraTabela = 0;
+	SET vMostraDeltaForecastTable = 0;
+	
+	
+	SET vLocalDashboardPath = 'D:\Processos\Forecast Accuracy\v2';		// Local onde são armazenados os qvds com dados históricos de Demanda e Forecast
+	
+	SET vDashboardPath = '\\sjkfs05\vss\GMT\71. Forecast Accuracy\v2';
+	
+	//SET vIntellicusOutputFolder = '\\egmap20038\Databases\Auxiliar'; 	
+	SET vIntellicusOutputFolder = '\\lnx755in\reports_shared'; 	
+	
+	SET vQVDsPath = '\\egmap20038\Databases'; 
+	
+	SET vSPM_Matrix_Civil = '\\lnx755in\SrcFiles';
+	
+	SET vSPM_Matrix_Def = '\\lnx003ds.gpx.emb.ds\SrcFiles';
+
+
+	
+	SET vChartMode = 'ASL';
+
+
+
+
+
+
+
+///$tab Calendar
+
+
+
+		// Geração de um calendário com 5 anos para trás.
+
+		Calendar:
+	
+	
+		LOAD
+		
+			Date ( MonthStart (  AddMonths ( Today (1), - (RowNo() -1) ) ), 'MM/YYYY' )    as [Forecast Slice Date]
+		
+		AutoGenerate 60;
+		
+		
+///$tab Previous Month
+
+		// Slice Date Temp
+		
+		SliceDateTemp:
+
+		LOAD
+		
+			[Forecast Slice Date]		as %ForecastSliceDate
+		
+		Resident Calendar
+		
+			Order By 1 desc
+		;		
+		
+		
+		
+		
+		LET vActualMonthForComparison = Peek('%ForecastSliceDate', 1);		
+		
+		LET vPreviousMonthForComparison = Peek('%ForecastSliceDate', 2);
+		
+		
+		
+		DROP TABLE SliceDateTemp;
+
+
+
+///$tab Demand
+
+
+
+
+		// Carregando as Locations da Matriz que serão utilizadas - Defesa
+
+		MatrizLocationTemp:
+
+		LOAD 
+
+			LocName 				as LocationFilter
+
+		FROM
+		[$(vSPM_Matrix_Def)\ipcsdd_loc_master.csv]
+		(txt, codepage is 1252, embedded labels, delimiter is '|', msq)
+			Where LocCustom7 = 'DEF'
+		;
+		
+		// Defesa
+		
+		
+		Historical_Data:
+			
+		LOAD 
+		
+			%CompoundForecastKey, 
+	     	Sum ( [Demanded Qty] )	as [Demanded Qty],
+	     	'DEF'					as [Business Unit Demand]
+	     		
+		FROM
+		[$(vLocalDashboardPath)\DemandDEF.qvd]
+		(qvd)
+			Where Exists ( LocationFilter, SubField ( %CompoundForecastKey, '-', 2 ) )
+			
+			Group By %CompoundForecastKey, 'DEF'
+		;
+
+		DROP Table MatrizLocationTemp;
+			
+
+
+		/* Carga da Demanda Executiva. Como a tabela IPCS_DEMAND_HISTORY não está no PR59, faz-se necessário extrair estes dados via Intellicus */
+
+	
+		
+//		Concatenate ( Historical_Data )
+//		
+//		LOAD 
+//			Ecode & '-' & Location & '-' & Date ( [Demand History Date], 'DD/YYYY')					as [%CompoundForecastKey],
+//			Sum ( [Demanded Qty] )	as [Demanded Qty],
+//			'EXE'					as [Business Unit Demand]  
+//		FROM
+//		[$(vIntellicusOutputFolder)\Demand History - Forecast Accuracy v2.csv]
+//		(txt, codepage is 1252, embedded labels, delimiter is ',')
+//		
+//			Group By Ecode & '-' & Location & '-' & Date ( [Demand History Date], 'DD/YYYY'), 'EXE'
+//		;
+
+
+		// Nova leitura com regra de cadeia
+		
+		Concatenate ( Historical_Data )
+		
+		LOAD 
+			If ( Len ( Ecoderolleddemand ) > 0, Ecoderolleddemand, Ecode ) 	 	& '-' & Location & '-' & Date ( [Demand History Date], 'DD/YYYY')				as [%CompoundForecastKey],
+	 		Sum ( [Demanded Qty] )																																	as [Demanded Qty],
+			'EXE'																																						as [Business Unit Demand]  
+			
+		FROM
+		[$(vIntellicusOutputFolder)\Demand History - Forecast Accuracy v2.csv]
+		(txt, codepage is 1252, embedded labels, delimiter is ',')
+		
+			Group By If ( Len ( Ecoderolleddemand ) > 0, Ecoderolleddemand, Ecode ) 	 	& '-' & Location & '-' & Date ( [Demand History Date], 'DD/YYYY'), 'EXE'
+		;
+
+///$tab Forecast
+
+
+		// Carregando as Locations da Matriz que serão utilizadas - Executiva
+		
+		MatrizLocationTemp:
+		
+		LOAD 
+		
+		     LocName 				as LocationFilter
+		     
+		FROM
+		[$(vSPM_Matrix_Civil)\EmbCOMEXE-LocationMaster.csv]
+		(txt, utf8, embedded labels, delimiter is '|', msq)
+			//Where LocCustom5 = 'EXE' 				Filtro removido em 03/03/2022 para incluir as Locations EXE que estão classificadas como ALL.
+		;
+
+		// Executiva
+				
+		ForecastTemp:
+		
+		LOAD 
+			Ecode & '-' & Location & '-' & Date ( [Forecast Slice Date], 'MM/YYYY')					as [%CompoundForecastKeyTemp], 
+		     Sum ( [Forecast Qty] ) 																as [Forecast Qty], 
+		     [Business Unit] 																		as [Business Unit Forecast]
+		     
+		FROM
+		[$(vLocalDashboardPath)\ForecastEXE.qvd]
+		(qvd)
+			Where Exists ( LocationFilter, Location )
+			
+			Group By Ecode & '-' & Location & '-' & Date ( [Forecast Slice Date], 'MM/YYYY'), [Business Unit]
+		;
+
+		DROP Table MatrizLocationTemp;
+		
+		
+		// Carregando as Locations da Matriz que serão utilizadas - Defesa
+
+		MatrizLocationTemp:
+
+		LOAD 
+
+			LocName 				as LocationFilter
+
+		FROM
+		[$(vSPM_Matrix_Def)\ipcsdd_loc_master.csv]
+		(txt, codepage is 1252, embedded labels, delimiter is '|', msq)
+			Where LocCustom7 = 'DEF'
+		;
+		
+		// Defesa
+				
+		Concatenate (ForecastTemp)	
+
+		LOAD
+		
+			Ecode & '-' & Location & '-' & Date ( [Forecast Slice Date], 'MM/YYYY')					as [%CompoundForecastKeyTemp], 
+		     Sum ( [Forecast Qty] )																	as [Forecast Qty],  
+		     [Business Unit] 																		as [Business Unit Forecast]
+		     
+		FROM
+		[$(vLocalDashboardPath)\ForecastDEF.qvd]
+		(qvd)
+			Where Exists ( LocationFilter, Location )
+			
+			Group By Ecode & '-' & Location & '-' & Date ( [Forecast Slice Date], 'MM/YYYY'), [Business Unit]
+		;
+
+		DROP Table MatrizLocationTemp;
+
+
+
+		// Incluindo a etapa de criação de uma tabela para os Pares que possuíam algum Forecast há 2 meses atrás e passaram a ter um Forecast de 0 no mês passado
+	
+		DeltaForecastTable:
+
+		LOAD 
+		
+			[%PairKey],
+			
+			Pick ( 
+				Match ( Sum ( [Previous Elegible] + [Actual Elegible] ), 2 ),
+		'Y' )																		as [isDeltaForecastTable]
+		
+		Group By [%PairKey]
+		;
+
+		LOAD 
+		
+			Left ( [%CompoundForecastKeyTemp], Index ( [%CompoundForecastKeyTemp], '-', 2) -1 )																													as [%PairKey],
+			If ( Date ( Date#( Right ( [%CompoundForecastKeyTemp], 7 ), 'MM/YYYY'), 'MM/YYYY' ) = Date ( Date#('$(vPreviousMonthForComparison)', 'MM/YYYY' ), 'MM/YYYY' ) and [Forecast Qty] > 0,
+			1, 0 ) 										as [Previous Elegible],
+			If ( Date ( Date#( Right ( [%CompoundForecastKeyTemp], 7 ), 'MM/YYYY'), 'MM/YYYY' ) = Date ( Date#('$(vActualMonthForComparison)', 'MM/YYYY' ), 'MM/YYYY' ) and ( [Forecast Qty] = 0 or Len ( [Forecast Qty] ) = 0 ),
+			1, 0 ) 	as [Actual Elegible]
+		
+		Resident ForecastTemp;
+
+///$tab Joining
+
+
+
+		// Colocando Demanda e Forecast na mesma tabela
+		
+
+		Join ( Historical_Data )
+		
+		LOAD
+			[%CompoundForecastKeyTemp]				as [%CompoundForecastKey], 
+		    [Forecast Qty],  
+		    [Business Unit Forecast]
+			
+		Resident ForecastTemp;
+		
+		DROP Table ForecastTemp;
+
+
+
+
+		// Recarga para criação do Forecast Slice Date e da unificação de Business Unit
+		
+		Historical_Data_Temp:
+		
+		LOAD
+		
+			[%CompoundForecastKey],
+			[Forecast Qty],
+			[Demanded Qty],
+			
+			If ( Len ( [Business Unit Forecast] ) = 0, [Business Unit Demand], [Business Unit Forecast] ) 		as [Business Unit],
+			Date ( Date#( Right ( [%CompoundForecastKey], 7 ), 'MM/YYYY'), 'MM/YYYY' )							as [Forecast Slice Date],
+			SubField ( [%CompoundForecastKey], '-', 1)															as Ecode,
+			SubField ( [%CompoundForecastKey], '-', 2)															as Location,
+			Left ( [%CompoundForecastKey], Index ( [%CompoundForecastKey], '-', 2) -1 )							as [%PairKey]
+				
+		
+		Resident Historical_Data;
+		
+		DROP Table Historical_Data;
+		
+		Rename Table Historical_Data_Temp to Historical_Data;
+ 		
+///$tab Forecast Streams
+
+
+		/* Carga das Streams de Forecast, apenas para referência dos usuários para parametrizarem por ID na planilha de premissas */
+		
+		
+		IF vUpdateStreams = 'Yes' THEN
+		
+		
+			//PR59 - SPM Civil
+			OLEDB CONNECT TO [Provider=OraOLEDB.Oracle.1;Persist Security Info=True;User ID=spm_stg;Data Source=pr59;Extended Properties=""] (XPassword is DSPKGZJGETMGWZAOPLFB);	
+			
+			ForecastStreamsEXE:
+			
+			SQL 
+				SELECT 
+			
+					FORECASTSTREAMID		as "Forecast Stream ID",
+					FSNAME						as "Forecast Name"
+			
+			
+				FROM IPCS_FORECAST_STREAM 
+				
+				ORDER BY FORECASTSTREAMID ASC	
+				;
+				
+				
+			STORE ForecastStreamsEXE into '$(vDashboardPath)\Forecast Streams EXE.csv' (txt, delimiter is ';') ;
+			
+			DROP Table ForecastStreamsEXE;
+
+
+			//PR01 - SPM Defesa	
+			CUSTOM CONNECT TO "Provider=QvOdbcConnectorPackage.exe;driver=oracle;host=ora-pr01ds.gpx.emb.ds;port=1521;servicename=pr01ds;EnableNcharSupport=1;XUserId=aSMQfJBKEaXGUHZJKF;XPassword=POYdMYFMTbcOXXJOELJETZBOEbYeGXBGQJOIWZVERJFB;";
+
+			ForecastStreamsDEF:
+			
+			SQL 
+				SELECT 
+			
+					FORECASTSTREAMID		as "Forecast Stream ID",
+					FSNAME						as "Forecast Name"
+			
+			
+				FROM IPCS_FORECAST_STREAM 
+				
+				ORDER BY FORECASTSTREAMID ASC	
+				;
+				
+				
+			STORE ForecastStreamsDEF into '$(vDashboardPath)\Forecast Streams DEF.csv' (txt, delimiter is ';') ;
+			
+			DROP Table ForecastStreamsDEF;
+
+
+		END IF;
+///$tab Demand Streams
+
+
+	IF vUpdateStreams = 'Yes' THEN
+
+
+		/* Carga das Streams de Demanda, apenas para referência dos usuários para parametrizarem por ID na planilha de premissas */
+		
+		
+//		
+//		DemandStreams:
+//		
+//		SQL 
+//			SELECT 
+//		
+//				DEMANDSTREAMID			as "Demand Stream ID",
+//				DSNAME						as "Demand Name"
+//		
+//		
+//			FROM IPCS_DEMAND_STREAM 
+//			
+//			ORDER BY DEMANDSTREAMID ASC	
+//			;
+//			
+//			
+//		STORE DemandStreams into '$(vDashboardPath)\Demand Streams.csv' (txt, delimiter is ';') ;
+//		
+//		DROP Table DemandStreams;
+
+
+	/* OBS: A tabela IPCS_DEMAND_STREAM não está no banco PR59 (SPM EXE), por isso não será possível gerá-la automaticamente em toda execução. Criei um report no Intellicus para gerar este csv sob demanda. */
+
+
+		//PR01 - SPM Defesa	
+		CUSTOM CONNECT TO "Provider=QvOdbcConnectorPackage.exe;driver=oracle;host=ora-pr01ds.gpx.emb.ds;port=1521;servicename=pr01ds;EnableNcharSupport=1;XUserId=aSMQfJBKEaXGUHZJKF;XPassword=POYdMYFMTbcOXXJOELJETZBOEbYeGXBGQJOIWZVERJFB;";
+
+
+		DemandStreamsDEF:
+		
+		SQL 
+			SELECT 
+		
+				DEMANDSTREAMID			as "Demand Stream ID",
+				DSNAME						as "Demand Name"
+		
+		
+			FROM IPCS_DEMAND_STREAM 
+			
+			ORDER BY DEMANDSTREAMID ASC	
+			;
+			
+			
+		STORE DemandStreamsDEF into '$(vDashboardPath)\Demand Streams DEF.csv' (txt, delimiter is ';') ;
+		
+		DROP Table DemandStreamsDEF;
+		
+END IF;
+///$tab Pair Data
+
+
+
+		PairData:
+
+		Left Keep ( Historical_Data )
+		
+		LOAD 
+		
+			 Ecode & '-' & Location 				as [%PairKey],
+		     Frequency, 
+		     ASL,
+		     [Lead Time],
+		     Region,
+		     MOQ, 
+		     ISPARTCHAIN,
+		     FILLRATE,
+		     STKD_PARTS								as [Stocked Parts]
+		     
+		FROM
+		[$(vQVDsPath)\DB_Pair-Data.qvd]
+		(qvd);
+///$tab Ecode Data
+
+
+
+		EcodeData:
+
+		Left Keep ( Historical_Data )
+		
+		LOAD 
+		
+		     ECODE 				as [Ecode],
+		     PN,
+		     ENGDESC				as [Material Description],
+		     ACQCOST				as [Acq Cost],
+		     GRPMERC				as [Merch Group],
+		     PLANNER 				as Planner
+		     
+		FROM
+		[$(vQVDsPath)\DB_Ecode-Data.qvd]
+		(qvd);
+///$tab Forecast Method
+
+
+
+		Left Keep ( Historical_Data )
+		
+		ForecastMethod:
+		
+		LOAD 
+		
+			Ecode & '-' & Location																			as %PairKey, 
+			If ( Len ( ForecastMethodID ) = 0, 'No Method ID Associated', [Forecast Method] )			as [Forecast Method]				
+				
+		FROM
+		[$(vLocalDashboardPath)\ForecastMethod.qvd]
+		(qvd);
+
