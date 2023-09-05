@@ -385,7 +385,7 @@ SET LongDayNames='segunda-feira;terça-feira;quarta-feira;quinta-feira;sexta-fei
 
 
 			//PR01 - SPM Defesa	
-			CUSTOM CONNECT TO "Provider=QvOdbcConnectorPackage.exe;driver=oracle;host=ora-pr01ds.gpx.emb.ds;port=1521;servicename=pr01ds;EnableNcharSupport=1;XUserId=aSMQfJBKEaXGUHZJKF;XPassword=POYdMYFMTbcOXXJOELJETZBOEbYeGXBGQJOIWZVERJFB;";
+			CUSTOM CONNECT TO "";
 
 			ForecastStreamsDEF:
 			
@@ -442,7 +442,7 @@ SET LongDayNames='segunda-feira;terça-feira;quarta-feira;quinta-feira;sexta-fei
 
 
 		//PR01 - SPM Defesa	
-		CUSTOM CONNECT TO "Provider=QvOdbcConnectorPackage.exe;driver=oracle;host=ora-pr01ds.gpx.emb.ds;port=1521;servicename=pr01ds;EnableNcharSupport=1;XUserId=aSMQfJBKEaXGUHZJKF;XPassword=POYdMYFMTbcOXXJOELJETZBOEbYeGXBGQJOIWZVERJFB;";
+		CUSTOM CONNECT TO "";
 
 
 		DemandStreamsDEF:
