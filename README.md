@@ -1,7 +1,7 @@
 # ForecastAccuracy
 Forecast Accuracy QlikView dashboard
 
-Internally developed Model.
+Internally own developed mathematical Model.
 
 Assumptions:
 
